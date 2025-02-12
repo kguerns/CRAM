@@ -34,10 +34,10 @@ public:
     void decompress() {}
     
 private:
-    std::string errBoundMode;
-    std::string compressorType;
-    double errBound;
-    std::string losslessCompressor;
+    std::string errBoundMode;       // Error Bound Mode (PW_REL)
+    std::string compressorType;     // Compressor Type (SZ3)
+    double errBound;                // Error Bound (1e-5)
+    std::string losslessCompressor; // Lossless Compressor (zstd)
 };
 
 int main() {
