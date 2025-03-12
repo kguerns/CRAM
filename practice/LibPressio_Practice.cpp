@@ -4,9 +4,9 @@
 int main(int argc, char *argv[])
 {
     pressio library;  
-    pressio_data metadata = pressio_data::empty(pressio_float_dtype, {500,500,100});
+    pressio_data metadata = pressio_data::empty(pressio_float_dtype, {500,500,100});    // size and type of data
     pressio_io posix = library.get_io("posix");
-    posix->set_options({{"io:path",  "CLOUDf48.bin.f32"}});
+    posix->set_options({{"io:path",  "CLOUDf48.bin.f32"}}); // path to data file
     pressio_data* input_data = posix->read(&metadata);
     pressio_data compressed = pressio_data::empty(pressio_byte_dtype, {});
     pressio_data output = pressio_data::owning(input_data->dtype(), input_data->dimensions());

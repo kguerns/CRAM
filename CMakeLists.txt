@@ -3,9 +3,9 @@ project(CRAM VERSION 0.0.1)
 
 find_package(LibPressio REQUIRED)
 
-add_executable(LibPressio_Practice LibPressio_Practice.cpp)
+add_executable(ArrayWrapper ArrayWrapper.cpp)
 
-add_library(CRAM ArrayWrapper.cpp)
+add_library(CRAM CRAM_Manager.cpp)
 
-target_link_libraries(LibPressio_Practice PRIVATE LibPressio::libpressio)
+target_link_libraries(ArrayWrapper PRIVATE LibPressio::libpressio)
 target_link_libraries(CRAM PUBLIC LibPressio::libpressio)

@@ -1,5 +1,3 @@
-
-
 #include <libpressio_ext/cpp/libpressio.h>
 #include <iostream>
 using namespace std;
@@ -17,6 +15,7 @@ public:
         data = new T[nx];
         ny = 0;
         nz = 0;
+        init_libpressio();
     }
 
     // 2D Array Constructor
@@ -64,10 +63,24 @@ private:
     size_t ny;          // y-dimension size
     size_t nz;          // z-dimension size
 
+    pressio library;    // LibPressio variables
+
     // Convert (i, j, k) index to flat index
     size_t convert_to_flat(size_t x_idx, size_t y_idx, size_t z_idx) {
         return z_idx * nx * ny + y_idx * nx + x_idx;
     }
+
+    // Initialize Compressor using LibPressio (for now, using SZ)
+    void init_libpressio() {
+        pressio_compressor compressor = library.get_compressor("sz");
+        compressor->set_options({
+            {"pressio:abs", 1e-1},      // set absolute error bound
+            {"pressio:metric", "composite"},
+            {"composite:plugins", std::vector<std::string>{"time", "size", "error_stat"}}
+        });
+    }
+    
+
 
 };
 
