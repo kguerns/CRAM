@@ -24,7 +24,7 @@ Note that the installation will take quite some time, so allocate enough resourc
 Compiling the programs is made easy using cmake. The ```CMakeLists.txt``` file finds the required files and libraries. The following commands can be used to build the program.
 
 1. ```cmake -B build -S .```
-2. ```cmake --build build -j 1``` (Create the executable, with 1 processor) 
+2. ```cmake --build build -j 1``` (Create the executable, with 1 processor)
 
-# Notes
-LibPressio_Practice.cpp is a basic example program pulled from https://github.com/robertu94/libpressio_tutorial/blob/master/exercises/1_basics/cxx/basics.cc
+# Run
+Run the program with ```./build/ArrayWrapper```.
