@@ -3,157 +3,198 @@
 #include <stdexcept>
 #include <cstring>
 #include "libpressio.h"
+#include "libpressio_ext/cpp/libpressio.h"
 using namespace std;
 
 template <typename T>
 class ArrayWrapper{
 public:
+    // Notes:
+    // for now, just give it an array of all the libpressio options (vector of std::pair)
+    // error checking valid options
+    // memcpy convenience entire
+    // compress data then remove the data variable data (unless need for debugging) - use lipressio data type for representing compressed data
 
     // Default Constructor
     ArrayWrapper() {}
 
-    // in constructor, store compressor name (line 36 & 42)
-    // for now, just give it an array of all the libpressio options (vector of std::pair)
-    // error cehcking valid options
-    // memcpy convenience entire
-    // compress data then remove the data variable data (unless need for debugging) - use lipressio data type for representing compressed data
-
     // 1D Array Constructor
-    ArrayWrapper(size_t nx, const char* compressor_choice) : nx(nx), ny(0), nz(0), ndim(1) {
-        data = new T[nx];   // Allocate array
-        init_libpressio(compressor_choice);  // Initialize Libpressio
+    ArrayWrapper(size_t nx, const char* compressor_choice) : nx(nx), ny(0), nz(0), ndim(1), dimensions{nx} {
+        data = new T[nx];
+        init_libpressio(compressor_choice);
+    }
+
+    // 2D Array Constructor
+    ArrayWrapper(size_t nx, size_t ny, const char* compressor_choice) : nx(nx), ny(ny), nz(0), ndim(2), dimensions{nx, ny} {
+        data = new T[nx * ny];
+        init_libpressio(compressor_choice);
+    }
+
+    // 3D Array Constructor
+    ArrayWrapper(size_t nx, size_t ny, size_t nz, const char* compressor_choice) : nx(nx), ny(ny), nz(nz), ndim(3), dimensions{nx, ny, nz} {
+        data = new T[nx * ny * nz];
+        init_libpressio(compressor_choice);
     }
 
     // Destructor
     ~ArrayWrapper() {
         if (data) delete[] data;
+        if (compressed_data) pressio_data_free(compressed_data);
+        if (decompressed_data) pressio_data_free(decompressed_data);
+        if (options) pressio_options_free(options);
+        if (compressor) pressio_compressor_release(compressor);
+        if (library) pressio_release(library);
     }
 
-    // Store value at flat index (write)
-    void store(size_t idx, T value) {
-        decompress_if_needed();
-        if (idx >= nx) throw std::out_of_range("Index out of range");
-        data[idx] = value;
-        // compress with new data
+    // 1D store (x)
+    void store(size_t x, T value) {
+        if (ndim != 1) throw std::invalid_argument("This store function is for 1D arrays");
+        if (x >= nx) throw std::out_of_range("Index out of range");
+        decompress();
+        data[x] = value;
+        compress();
     }
 
-    // Load value at flat index (read)
-    T load(size_t idx) {
-        decompress_if_needed();
-        if (idx >= nx) throw std::out_of_range("Index out of range");
-        return data[idx];
+    // 2D store (x, y)
+    void store(size_t x, size_t y, T value) {
+        if (ndim != 2) throw std::invalid_argument("This store function is for 2D arrays");
+        if (x >= nx || y >= ny) throw std::out_of_range("Index out of range");
+        decompress();
+        size_t flat = convert_to_flat(x, y, 0);
+        data[flat] = value;
+        compress();
     }
 
-    // Compress array data
-    void compress() {
-        if (!data) throw std::runtime_error("No data to compress");
-        cout << "Compressing...\n";
+    // 3D store (x, y, z)
+    void store(size_t x, size_t y, size_t z, T value) {
+        if (ndim != 3) throw std::invalid_argument("This store function is for 3D arrays");
+        if (x >= nx || y >= ny || z >= nz) throw std::out_of_range("Index out of range");
+        decompress();
+        size_t flat = convert_to_flat(x, y, z);
+        data[flat] = value;
+        compress();
+    }
 
-        size_t dimensions[] = {nx};
+    // 1D Load (x)
+    T load(size_t x) {
+        if (ndim != 1) throw std::invalid_argument("This store function is for 1D arrays");
+        if (x >= nx) throw std::out_of_range("Index out of range");
+        decompress();
+        T value = data[x];
+        compress();
+        return value;
+    }
 
-        cout << data[0] << "\n";
+    // 2D Load (x, y)
+    T load(size_t x, size_t y) {
+        if (ndim != 2) throw std::invalid_argument("This store function is for 2D arrays");
+        if (x >= nx || y >= ny) throw std::out_of_range("Index out of range");
+        decompress();
+        size_t flat = convert_to_flat(x, y, 0);
+        T value = data[flat];
+        compress();
+        return value;
+    }
 
-        // Convert input data to a pressio_data object
-        // nonowning function so libpressio doesnt delete "data"
-        input_data = pressio_data_new_move(
-            dtype_from_type(),
-            data,
-            ndim,
-            dimensions,
-            pressio_data_libc_free_fn,
-            NULL
-        );
-
-        // Create an output dataset pointer
-        compressed_data = pressio_data_new_empty(
-            pressio_byte_dtype, 
-            0, 
-            NULL
-        );
-
-        // Compress data
-        if (pressio_compressor_compress(compressor, input_data, compressed_data)) {
-            printf("%s\n", pressio_compressor_error_msg(compressor));
-            exit(pressio_compressor_error_code(compressor));
-        }
-
-        delete[] data;
-        data = nullptr;
-        is_compressed = true;
+    // 3D Load (x, y, z)
+    T load(size_t x, size_t y, size_t z) {
+        if (ndim != 3) throw std::invalid_argument("This store function is for 3D arrays");
+        if (x >= nx || y >= ny || z >= nz) throw std::out_of_range("Index out of range");
+        decompress();
+        size_t flat = convert_to_flat(x, y, z);
+        T value = data[flat];
+        compress();
+        return value;
     }
 
 private:
-    T* data = nullptr;  // array data for initial storing
+    T* data = nullptr;  // array data for storing
     size_t ndim;        // dimensions of array (1, 2, or 3)
     size_t nx;          // x-dimension size
     size_t ny;          // y-dimension size
     size_t nz;          // z-dimension size
+    std::vector<size_t> dimensions;
     bool is_compressed = false;
 
-    // Libpressio variables
-    pressio* library;
-    pressio_compressor* compressor;
-    pressio_options* options;
-    pressio_data* input_data;
-    pressio_data* compressed_data;
-    pressio_data* decompressed_data;
+    // LibPressio variables
+    struct pressio* library;
+    struct pressio_compressor* compressor;
+    struct pressio_options* options;
+    struct pressio_data* data_to_compress;
+    struct pressio_data* compressed_data;
+    struct pressio_data* decompressed_data;
 
-    // Convert (i, j, k) index to flat index
-    size_t convert_to_flat(size_t x_idx, size_t y_idx, size_t z_idx) {
-        return z_idx * nx * ny + y_idx * nx + x_idx;
+    // Convert (x, y, z) index to flat index
+    size_t convert_to_flat(size_t x, size_t y, size_t z) {
+        return z * nx * ny + y * nx + x;
     }
 
     // Initialize LibPressio
     void init_libpressio(const char* compressor_choice) {
-        cout << "Initializing LibPressio...\n";
-        // Error checking:
-        // Is compressor_choice one of the valid options?
-        // Can I have more than one libressio instance, like one for each initialized array?
-        //compressor_choice = "sz";   // remove eventually
+        // Error Checking:
+        // is compressor_choice one of the valid options?
+        // can i have more than one libpressio instance, like one for each array?
         
         library = pressio_instance();
+
+        // All compressor options
+        //for (auto c: compressor_plugins()) {
+        //    std::cout << c.first << std::endl;
+        //}
+
         compressor = pressio_get_compressor(library, compressor_choice);
-        if (!compressor) {
-            throw std::runtime_error("Invalid compressor");
-        }
-
-        // Set compressor options
         options = pressio_compressor_get_options(compressor);
-        pressio_options_set_integer(options, "sz:error_bound_mode", 1);
-        pressio_options_set_double(options, "sz:abs_err_bound", 1e-1);
+        pressio_options_set_double(options, "pressio:abs", 1e-5);
 
-        // Check valid options
-        if (pressio_compressor_check_options(compressor, options)) {
-            printf("%s\n", pressio_compressor_error_msg(compressor));
-            exit(pressio_compressor_error_code(compressor));
-        }
-        if (pressio_compressor_set_options(compressor, options)) {
-            printf("%s\n", pressio_compressor_error_msg(compressor));
-            exit(pressio_compressor_error_code(compressor));
+    }
+
+    // Compress
+    void compress() {
+        if (!is_compressed) {
+            //cout << "Compressing...\n";
+
+            data_to_compress = pressio_data_new_move(pressio_float_dtype, data, ndim, dimensions.data(), pressio_data_libc_free_fn, NULL);
+            compressed_data = pressio_data_new_empty(pressio_byte_dtype, 0, NULL);
+
+            if (pressio_compressor_compress(compressor, data_to_compress, compressed_data)) {
+                printf("%s\n", pressio_compressor_error_msg(compressor));
+                exit(pressio_compressor_error_code(compressor));
+            }
+
+            //delete[] data;
+            //data = nullptr;
+            is_compressed = true;
         }
     }
 
-    // Decompress array data
-    void decompress_if_needed() {
+    // Decompress
+    void decompress() {
         if (is_compressed) {
-            cout << "Decompressing...\n";
-            size_t dimensions[] = {nx};
+            //cout << "Decompressing...\n";
 
-            decompressed_data = pressio_data_new_empty(dtype_from_type(), ndim, dimensions);
-
+            decompressed_data = pressio_data_new_empty(pressio_float_dtype, ndim, dimensions.data());
+            
             if (pressio_compressor_decompress(compressor, compressed_data, decompressed_data)) {
                 printf("%s\n", pressio_compressor_error_msg(compressor));
                 exit(pressio_compressor_error_code(compressor));
-            }     
-
-            // Copy decompressed data back to user-accessible array
+            }
+            /*
             void* decompressed_ptr = pressio_data_ptr(decompressed_data, nullptr);
-            std::memcpy(data, decompressed_ptr, nx * sizeof(T));
+            cout <<"passed\n";
+            if ( ndim = 1) {
+                std::memcpy(data, decompressed_ptr, nx * sizeof(T));
+            } else if(ndim = 2) {
+                std::memcpy(data, decompressed_ptr, nx * ny * sizeof(T));
+            } else if (ndim = 3) {
+                std::memcpy(data, decompressed_ptr, nx * ny * nz * sizeof(T));
+            }
+            */
 
             is_compressed = false;
         }
     }
 
+    // Pressio data type helper
     pressio_dtype dtype_from_type() {
         if constexpr (std::is_same<T, float>::value) return pressio_float_dtype;
         if constexpr (std::is_same<T, double>::value) return pressio_double_dtype;
@@ -165,16 +206,15 @@ private:
 };
 
 int main() {
-    // Initialize 1D float array of size 10, use SZ compressor
-    ArrayWrapper<float> test_array1(10, "sz");
-    /*for (int i=0; i < 1; i++) {
-        test_array1.store(i, i);        // Store (write)
-    }*/
-    test_array1.store(0, 27.1);
-    test_array1.compress();
-    test_array1.load(0);
+    // Initialize data
+    int n = 32;
+    ArrayWrapper<float> test_array2(n, n, "sz3");
+    for (int i=0; i < n; i++) {
+        for (int j=0; j < n; j++) {
+            test_array2.store(i, j, i*n+j);
+        }
+    }
 
-    /*for (int i=0; i < 1; i++) {
-        cout << test_array1.load(i) << "\n";    // Load (read)
-    }*/
+    cout << test_array2.load(1,1);
+
 }
