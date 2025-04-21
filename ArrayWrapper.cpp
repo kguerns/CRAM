@@ -50,38 +50,38 @@ public:
     void store(size_t x, T value) {
         if (ndim != 1) throw std::invalid_argument("This store function is for 1D arrays");
         if (x >= nx) throw std::out_of_range("Index out of range");
-        decompress();
+        if (!batch_mode) decompress();
         data[x] = value;
-        compress();
+        if (!batch_mode) compress();
     }
 
     // 2D store (x, y)
     void store(size_t x, size_t y, T value) {
         if (ndim != 2) throw std::invalid_argument("This store function is for 2D arrays");
         if (x >= nx || y >= ny) throw std::out_of_range("Index out of range");
-        decompress();
+        if (!batch_mode) decompress();
         size_t flat = convert_to_flat(x, y, 0);
         data[flat] = value;
-        compress();
+        if (!batch_mode) compress();
     }
 
     // 3D store (x, y, z)
     void store(size_t x, size_t y, size_t z, T value) {
         if (ndim != 3) throw std::invalid_argument("This store function is for 3D arrays");
         if (x >= nx || y >= ny || z >= nz) throw std::out_of_range("Index out of range");
-        decompress();
+        if (!batch_mode) decompress();
         size_t flat = convert_to_flat(x, y, z);
         data[flat] = value;
-        compress();
+        if (!batch_mode) compress();
     }
 
     // 1D Load (x)
     T load(size_t x) {
         if (ndim != 1) throw std::invalid_argument("This store function is for 1D arrays");
         if (x >= nx) throw std::out_of_range("Index out of range");
-        decompress();
+        if (!batch_mode) decompress();
         T value = data[x];
-        compress();
+        if (!batch_mode) compress();
         return value;
     }
 
@@ -89,10 +89,10 @@ public:
     T load(size_t x, size_t y) {
         if (ndim != 2) throw std::invalid_argument("This store function is for 2D arrays");
         if (x >= nx || y >= ny) throw std::out_of_range("Index out of range");
-        decompress();
+        if (!batch_mode) decompress();
         size_t flat = convert_to_flat(x, y, 0);
         T value = data[flat];
-        compress();
+        if (!batch_mode) compress();
         return value;
     }
 
@@ -100,21 +100,34 @@ public:
     T load(size_t x, size_t y, size_t z) {
         if (ndim != 3) throw std::invalid_argument("This store function is for 3D arrays");
         if (x >= nx || y >= ny || z >= nz) throw std::out_of_range("Index out of range");
-        decompress();
+        if (!batch_mode) decompress();
         size_t flat = convert_to_flat(x, y, z);
         T value = data[flat];
-        compress();
+        if (!batch_mode) compress();
         return value;
     }
 
+    // Set batch_mode to disable/enable compression/decompression when needed
+    void set_batch_mode(bool value) {
+        if (batch_mode != value) {      // only change batch_mode if value is different
+            batch_mode = value;
+            if (batch_mode == true) {   // decompress before batch
+                decompress();
+            } else {
+                compress();             // compress after batch
+            }
+        }   
+    }
+
 private:
-    T* data = nullptr;  // array data for storing
+    T* data;  // array data for storing
     size_t ndim;        // dimensions of array (1, 2, or 3)
     size_t nx;          // x-dimension size
     size_t ny;          // y-dimension size
     size_t nz;          // z-dimension size
     std::vector<size_t> dimensions;
     bool is_compressed = false;
+    bool batch_mode = false;
 
     // LibPressio variables
     struct pressio* library;
@@ -155,14 +168,16 @@ private:
 
             data_to_compress = pressio_data_new_move(pressio_float_dtype, data, ndim, dimensions.data(), pressio_data_libc_free_fn, NULL);
             compressed_data = pressio_data_new_empty(pressio_byte_dtype, 0, NULL);
-
+            
             if (pressio_compressor_compress(compressor, data_to_compress, compressed_data)) {
                 printf("%s\n", pressio_compressor_error_msg(compressor));
                 exit(pressio_compressor_error_code(compressor));
             }
 
-            //delete[] data;
-            //data = nullptr;
+            //std::cout << "Compressed size: " << pressio_data_num_elements(compressed_data) << std::endl;
+
+            delete[] data;
+            data = nullptr;
             is_compressed = true;
         }
     }
@@ -171,24 +186,23 @@ private:
     void decompress() {
         if (is_compressed) {
             //cout << "Decompressing...\n";
-
             decompressed_data = pressio_data_new_empty(pressio_float_dtype, ndim, dimensions.data());
+            //std::cout << "Decompressed num elements: " << pressio_data_num_elements(decompressed_data) << std::endl;
             
             if (pressio_compressor_decompress(compressor, compressed_data, decompressed_data)) {
                 printf("%s\n", pressio_compressor_error_msg(compressor));
                 exit(pressio_compressor_error_code(compressor));
             }
-            /*
+
+            // Copy decompressed data back to user-accessible data variable
             void* decompressed_ptr = pressio_data_ptr(decompressed_data, nullptr);
-            cout <<"passed\n";
-            if ( ndim = 1) {
-                std::memcpy(data, decompressed_ptr, nx * sizeof(T));
-            } else if(ndim = 2) {
-                std::memcpy(data, decompressed_ptr, nx * ny * sizeof(T));
-            } else if (ndim = 3) {
-                std::memcpy(data, decompressed_ptr, nx * ny * nz * sizeof(T));
-            }
-            */
+            if (decompressed_ptr == nullptr) cout << "NULL\n";
+            size_t num_elements = pressio_data_num_elements(decompressed_data);
+            size_t total_bytes = num_elements * sizeof(T);
+
+            if (data != nullptr) delete[] data;
+            data = new T[num_elements];
+            //std::memcpy(data, decompressed_ptr, total_bytes);
 
             is_compressed = false;
         }
@@ -207,14 +221,27 @@ private:
 
 int main() {
     // Initialize data
-    int n = 32;
+    int n = 64;
     ArrayWrapper<float> test_array2(n, n, "sz3");
-    for (int i=0; i < n; i++) {
+
+    // Without batch_mode
+    /*for (int i=0; i < n; i++) {
         for (int j=0; j < n; j++) {
             test_array2.store(i, j, i*n+j);
         }
     }
 
-    cout << test_array2.load(1,1);
+    cout << test_array2.load(1,1) << "\n";*/
+
+    // With batch_mode
+    test_array2.set_batch_mode(true);
+    for (int i=0; i < n; i++) {
+        for (int j=0; j < n; j++) {
+            test_array2.store(i, j, (i*n+j)*2);
+        }
+    }
+    test_array2.set_batch_mode(false);
+
+    cout << test_array2.load(1,1) << "\n";
 
 }
